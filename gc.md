@@ -253,9 +253,143 @@ dec_ref_cnt(obj){
 - 实现繁琐复杂
 - 循环引用无法回收
 ### 延迟引用计数法
-## 分代
-## 复制
-## 标记压缩
+### Sticky 引用计数法
+### 1位引用计数法
+### 部分标记清除算法
+
+## GC复制算法
+GC复制算法（Copying GC），简单来说，就是只把某个空间里的活动对象复制到其他空间，把原空间里的所有对象都回收掉。将复制活动对象的原空间称为 From 空间，将粘贴活动对象的新空间称为 To 空间。
+
+GC复制算法是利用From空间进行分配的。当From空间被完全占满时，GC会将活动对象全部复制到To空间。当复制完成后，该算法会把From空间和To空间互换，GC也就结束了。From空间和To空间大小必须一致。这是为了保证能把From空间中的所有活动对象都收纳到To空间里。
+```
+copying(){
+    $free = $to_start
+    for(r : $roots)
+	*r = copy(*r)
+
+    swap($from_start, $to_start)
+}
+```
+$free 是指示分块开头的变量。首先在第2行将$free设置在 To 空间的开头，然后复制能从根引用的对象。copy()函数将作为参数传递的对象`*r`复制的同时，也将其子对象进行递归复制。复制结束后返回指针，这里返回的指针指向的是 *r 所在的新空间的对象。
+
+在 GC 复制算法中，在GC结束时，原空间的对象会作为垃圾被回收。因此，由根指向原空间对象的指针也会被重写成指向返回值的新对象的指针。
+
+最后把 From 空间和 To 空间互换，GC就结束了。
+
+GC复制算法的关键当然要数 copy() 函数
+```
+// 将作为参数给出的对象复制，再递归复制其子对象。
+copy(obj){
+    if(obj.tag != COPIED)
+	copy_data($free, obj, obj.size)
+	obj.tag = COPIED
+	obj.forwarding = $free
+	$free += obj.size
+
+	for(child : children(obj.forwarding))
+	    *child = copy(*child)
+
+    return obj.forwarding
+}
+
+new_obj(size){
+    if($free + size > $from_start + HEAP_SIZE/2)
+	copying()
+	if($free + size > $from_start + HEAP_SIZE/2)
+	    allocation_fail()
+    
+    obj = $free
+    obj.size = size
+    $free += size
+    return obj
+}
+```
+**优点**
+- 优秀的吞吐量
+- 可实现告诉分配
+- 不会发生碎片化
+- 与缓存兼容
+
+**缺点**
+- 堆使用效率低下
+- 不兼容保守式GC算法
+- 递归调用函数，栈溢出风险
+
+### Cheney的GC复制算法
+### 近似深度优先搜索方法
+### 多空间复制算法
+## GC标记压缩算法
+GC标记压缩算法（Mark Compact GC）是将GC标记清除算法与GC复制算法相结合的产物。
+
+GC标记压缩算法也是由标记阶段和压缩阶段构成。
+
+首先，这里的标记阶段和我们在讲解GC标记清除算法时提到的标记阶段完全一样。
+
+接下来，我们要搜索数次堆来进行压缩。压缩阶段通过数次搜索堆来重新装填活动对象。
+因压缩而产生的优点与GC复制算法一样，不过不需要牺牲半个堆。
+
+**压缩阶段**
+- 设定forwarding指针
+- 更新指针
+- 移动对象
+```
+compaction_phase(){
+    set_forwarding_ptr()
+    adjust_ptr()
+    move_obj()
+}
+
+// 设定foewarding指针
+set_forwarding_ptr(){
+    scan = new_address = $heap_start // scan 是用来搜索堆中的对象的指针，new_address 是指向目标地点的指针。
+    while(scan < $heap_end)
+	if(scan.mark == TRUE)
+	    scan.forwarding = new_address
+	    new_address += scan.size
+	scan += scan.size
+}
+
+// 更新指针
+adjust_ptr(){
+    for(r : $roots)
+	*r = (*r).forwarding
+
+    scan = $heap_start
+    while(sacn < $heap_end)
+	if(scan.mark == TRUE)
+	    for(child : children(scan)
+		*child = (*child).forwarding
+	scan += scan.size
+}
+
+// 移动对象
+move_obj(){
+    scan = $free = $heap_start
+    while(scan < $heap_end)
+	if(scan.mark == TRUE)
+	    new_address = scan.forwarding
+	    copy_data(new_address, scan, scan.size)
+	    new_address.forwarding = NULL
+	    new_address.mark = FALSE
+	    $free += new_address.size
+	    scan += scan.size
+}
+```
+
+**优点**
+- 可有效利用堆
+
+**缺点**
+- 必须堆整个堆进行3次搜索，时间长
+- 吞吐量劣于其他算法
+
+### Two-Finger算法
+### 表格算法
+### ImmixGC算法
 ## 保守式
+## 分代垃圾回收
+分代垃圾回收（Generational GC）在对象中倒入了“年龄”的概念，通过优先回收容易成为垃圾的对象，提高垃圾回收的效率。
+
+
 ## 增量式
 ## RC Immix
